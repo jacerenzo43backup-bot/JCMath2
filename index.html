@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>JCMath</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0b1020">
+<link rel="icon" href="icon.png">
+<style>
+:root{--blue:#0b6fd6;--bg:#0b1020;--white:#fff}
+html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;background:var(--blue);color:var(--white);-webkit-text-size-adjust:none}
+.center{display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column}
+/* Splash */
+#splash{position:fixed;inset:0;background:var(--blue);display:flex;align-items:center;justify-content:center;flex-direction:column;z-index:9999;overflow:hidden}
+#title{font-size:44px;font-weight:400;margin:0}
+#loading{font-size:14px;margin-top:8px;opacity:0.95}
+.symbol{position:absolute;font-size:24px;color:rgba(255,255,255,0.95);will-change:transform;pointer-events:none}
+/* menu */
+#menu{display:none;height:100vh;box-sizing:border-box;padding:28px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;background:var(--blue)}
+#menuTitle{margin-top:24px;font-size:20px;margin-bottom:18px}
+.buttons{display:flex;flex-direction:column;gap:16px;width:85%;max-width:420px}
+.btn{background:var(--white);color:var(--blue);padding:14px;border-radius:12px;border:none;font-size:18px;font-weight:600;text-align:center}
+.coming{opacity:0.9;font-size:14px;color:rgba(255,255,255,0.95);margin-top:6px;text-align:center}
+#version{position:fixed;right:12px;bottom:12px;font-size:12px;color:rgba(255,255,255,0.85)}
+
+/* game view */
+#gameView{display:none;background:#081226;height:100vh;box-sizing:border-box;padding:18px;position:relative}
+#gameCanvas{width:100%;height:70vh;background:#04101b;border-radius:12px;display:block}
+#backBtn{position:absolute;left:12px;top:12px;background:rgba(255,255,255,0.95);color:var(--blue);border:none;padding:8px 12px;border-radius:8px;font-weight:700}
+#gameHeader{display:flex;align-items:center;justify-content:center;margin-bottom:10px}
+#scoreboard{color:white;text-align:center;margin-top:10px}
+
+/* voxel view */
+#voxelView{display:none;background:#081226;height:100vh;box-sizing:border-box;padding:12px;position:relative;color:var(--white)}
+#voxelCanvas{width:100%;height:70vh;background:#072033;border-radius:10px;display:block}
+#backBtn2{position:absolute;left:12px;top:12px;background:rgba(255,255,255,0.95);color:var(--blue);border:none;padding:8px 12px;border-radius:8px;font-weight:700}
+#controlsBar{position:fixed;right:12px;top:12px;display:flex;flex-direction:column;gap:8px}
+.smallBtn{background:rgba(255,255,255,0.95);color:var(--blue);border:none;padding:8px 10px;border-radius:8px;font-weight:700}
+
+/* transitions */
+.fade-out{animation:fadeOut 1s forwards}
+.fade-in{animation:fadeIn 1s forwards}
+@keyframes fadeOut{to{opacity:0;visibility:hidden}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+
+/* responsive */
+@media (max-width:520px){#title{font-size:36px} .btn{font-size:16px;padding:12px}}
+</style>
+</head>
+<body>
+  <div id="splash" aria-hidden="false">
+    <div id="title">JCMath</div>
+    <div id="loading">Loading...</div>
+  </div>
+
+  <main id="menu" aria-hidden="true" class="center">
+    <div id="menuTitle">🎮 JCMath Games</div>
+    <div class="buttons">
+      <button class="btn" id="minecraftBtn">Minecraft Game</button>
+      <div class="coming">Offline 3D sandbox</div>
+      <button class="btn" id="carBtn">Car Game</button>
+      <div class="coming">Coming Soon</div>
+      <button class="btn" id="paddleBtn">Paddle Game</button>
+    </div>
+    <div id="version">Version 1.0</div>
+  </main>
+
+  <section id="gameView" aria-hidden="true">
+    <button id="backBtn">Back</button>
+    <div id="gameHeader"><h2 style="color:white;margin:0">Paddle Game</h2></div>
+    <canvas id="gameCanvas" width="800" height="540" role="img" aria-label="Paddle game canvas"></canvas>
+    <div id="scoreboard">Score: <span id="score">0</span></div>
+  </section>
+
+  <section id="voxelView" aria-hidden="true">
+    <button id="backBtn2">Back</button>
+    <div id="controlsBar">
+      <button class="smallBtn" id="rotateBtn">Rotate View</button>
+      <button class="smallBtn" id="addBtn">Add Block</button>
+      <button class="smallBtn" id="removeBtn">Remove Block</button>
+      <div style="background:rgba(255,255,255,0.06);padding:8px;border-radius:8px;margin-top:6px;font-size:13px">Tap to add/remove blocks • Drag to pan</div>
+    </div>
+    <canvas id="voxelCanvas" width="800" height="600"></canvas>
+  </section>
+
+<script>
+// register SW
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('service-worker.js').catch(()=>{}); }
+
+// bouncing symbols implementation using velocities
+const splashEl = document.getElementById('splash');
+const SYMBOLS = ['+','−','×','÷'];
+let particles = [];
+const MAX_PARTICLES = 18;
+
+function makeParticle(){
+  const el = document.createElement('div');
+  el.className = 'symbol';
+  el.textContent = SYMBOLS[Math.floor(Math.random()*SYMBOLS.length)];
+  const size = 16 + Math.random()*36;
+  el.style.fontSize = size + 'px';
+  splashEl.appendChild(el);
+  const p = {
+    el,
+    x: Math.random() * (window.innerWidth * 0.8) + window.innerWidth*0.1,
+    y: Math.random() * (window.innerHeight * 0.6) + window.innerHeight*0.2,
+    vx: (Math.random()*2-1) * (1.5 + Math.random()*2),
+    vy: (Math.random()*2-1) * (1.5 + Math.random()*2),
+    size
+  };
+  el.style.left = p.x + 'px';
+  el.style.top = p.y + 'px';
+  particles.push(p);
+}
+
+for(let i=0;i<MAX_PARTICLES;i++) makeParticle();
+
+function animateParticles(){
+  const w = window.innerWidth, h = window.innerHeight;
+  for(const p of particles){
+    p.x += p.vx; p.y += p.vy;
+    // bounce off edges
+    const pad = 20;
+    if(p.x < pad){ p.x = pad; p.vx *= -1; }
+    if(p.x > w - pad){ p.x = w - pad; p.vx *= -1; }
+    if(p.y < pad){ p.y = pad; p.vy *= -1; }
+    if(p.y > h - pad){ p.y = h - pad; p.vy *= -1; }
+    // small randomness
+    p.vx += (Math.random()-0.5)*0.2; p.vy += (Math.random()-0.5)*0.2;
+    p.el.style.transform = 'translate(' + (p.x - p.size/2) + 'px,' + (p.y - p.size/2) + 'px)';
+  }
+  requestAnimationFrame(animateParticles);
+}
+animateParticles();
+
+setTimeout(()=>{
+  // fade into menu
+  splashEl.classList.add('fade-out');
+  setTimeout(()=>{ splashEl.style.display='none'; document.getElementById('menu').style.display='flex'; document.getElementById('menu').classList.add('fade-in'); }, 1000);
+}, 3000);
+
+// Menu actions
+document.getElementById('paddleBtn').addEventListener('click', ()=> showPaddle());
+document.getElementById('minecraftBtn').addEventListener('click', ()=> showVoxel());
+document.getElementById('carBtn').addEventListener('click', ()=> alert('Car Game - Coming Soon'));
+
+// Views and navigation
+const menu = document.getElementById('menu');
+const gameView = document.getElementById('gameView');
+const voxelView = document.getElementById('voxelView');
+const backBtn = document.getElementById('backBtn');
+const backBtn2 = document.getElementById('backBtn2');
+backBtn.addEventListener('click', ()=> hidePaddle());
+backBtn2.addEventListener('click', ()=> hideVoxel());
+
+function showPaddle(){ menu.style.display='none'; voxelView.style.display='none'; gameView.style.display='block'; gameView.classList.add('fade-in'); startPaddle(); }
+function hidePaddle(){ gameView.style.display='none'; menu.style.display='flex'; menu.classList.add('fade-in'); stopPaddle(); }
+function showVoxel(){ menu.style.display='none'; gameView.style.display='none'; voxelView.style.display='block'; voxelView.classList.add('fade-in'); initVoxel(); }
+function hideVoxel(){ voxelView.style.display='none'; menu.style.display='flex'; menu.classList.add('fade-in'); stopVoxel(); }
+
+/* --------- Paddle game (fixed physics) --------- */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+let W = canvas.width, H = canvas.height;
+let paddle = {w:120,h:14,x:(W-120)/2,y:H-40,speed:8};
+let ball = {x:W/2,y:H/2,r:9,vx:4,vy:-4,moving:false};
+let bricks = [];
+let score = 0;
+const scoreEl = document.getElementById('score');
+
+function buildBricks(){ bricks=[]; const rows=4, cols=7, bw=90, bh=20, gap=10; const offsetX=(W-(cols*bw+(cols-1)*gap))/2; const offsetY=60; for(let r=0;r<rows;r++){ for(let c=0;c<cols;c++){ bricks.push({x:offsetX + c*(bw+gap), y:offsetY + r*(bh+gap), w:bw, h:bh, alive:true}); } } }
+
+function resetBall(){ ball.x = paddle.x + paddle.w/2; ball.y = paddle.y - 16; if(Math.abs(ball.vx) < 1) ball.vx = (Math.random()>0.5?1:-1)*3; if(Math.abs(ball.vy) < 1) ball.vy = -4; ball.moving = false; }
+
+function draw(){ ctx.clearRect(0,0,W,H); bricks.forEach(b=>{ if(!b.alive) return; ctx.fillStyle='#1f6feb'; ctx.fillRect(b.x,b.y,b.w,b.h); ctx.strokeStyle='rgba(255,255,255,0.04)'; ctx.strokeRect(b.x,b.y,b.w,b.h); }); ctx.fillStyle='#fff'; roundRect(ctx,paddle.x,paddle.y,paddle.w,paddle.h,8,true,false); ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fillStyle='#ffb86b'; ctx.fill(); requestAnimationFrame(loop); }
+
+function loop(){ update(); draw(); }
+
+function update(){ if(keys['ArrowLeft']||keys['a']) paddle.x -= paddle.speed; if(keys['ArrowRight']||keys['d']) paddle.x += paddle.speed; paddle.x = Math.max(8, Math.min(W - paddle.w - 8, paddle.x)); if(ball.moving){ ball.x += ball.vx; ball.y += ball.vy; if(ball.x - ball.r < 0){ ball.x = ball.r; ball.vx = Math.abs(ball.vx); } if(ball.x + ball.r > W){ ball.x = W - ball.r; ball.vx = -Math.abs(ball.vx); } if(ball.y - ball.r < 0){ ball.y = ball.r; ball.vy = Math.abs(ball.vy); } if(ball.y + ball.r >= paddle.y && ball.y + ball.r <= paddle.y + paddle.h && ball.x >= paddle.x && ball.x <= paddle.x + paddle.w && ball.vy>0){ const rel = (ball.x - (paddle.x + paddle.w/2)) / (paddle.w/2); const speed = Math.hypot(ball.vx, ball.vy); const newAngle = rel * (Math.PI/3); ball.vx = speed * Math.sin(newAngle); ball.vy = -Math.abs(speed * Math.cos(newAngle)); if(Math.abs(ball.vx) < 1) ball.vx = (ball.vx < 0 ? -1 : 1) * 1.5; if(Math.abs(ball.vy) < 2) ball.vy = -2.5; } bricks.forEach(b=>{ if(!b.alive) return; if(ball.x > b.x && ball.x < b.x + b.w && ball.y - ball.r < b.y + b.h && ball.y + ball.r > b.y){ b.alive = false; score += 10; scoreEl.textContent = score; ball.vy *= -1; } }); if(ball.y - ball.r > H){ score = 0; scoreEl.textContent = score; buildBricks(); resetBall(); } } else { ball.x = paddle.x + paddle.w/2; ball.y = paddle.y - 16; } }
+
+function roundRect(ctx,x,y,w,h,r,fill,stroke){ if(typeof r==='undefined') r=5; ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); if(fill) ctx.fill(); if(stroke) ctx.stroke(); }
+
+// input
+let keys = {};
+window.addEventListener('keydown', e=>{ keys[e.key]=true; if(e.code==='Space'){ ball.moving = !ball.moving } if(['ArrowLeft','ArrowRight'].includes(e.code)){ e.preventDefault(); } });
+window.addEventListener('keyup', e=>{ keys[e.key]=false; });
+canvas.addEventListener('mousemove', e=>{ const rect = canvas.getBoundingClientRect(); const scaleX = canvas.width / rect.width; const x = (e.clientX - rect.left) * scaleX; paddle.x = Math.max(8, Math.min(W - paddle.w - 8, x - paddle.w/2)); });
+canvas.addEventListener('touchmove', e=>{ e.preventDefault(); const touch = e.touches[0]; const rect = canvas.getBoundingClientRect(); const scaleX = canvas.width / rect.width; const x = (touch.clientX - rect.left) * scaleX; paddle.x = Math.max(8, Math.min(W - paddle.w - 8, x - paddle.w/2)); }, {passive:false});
+
+function tickControls(){ requestAnimationFrame(tickControls); }
+tickControls();
+
+function startPaddle(){ W = canvas.width; H = canvas.height; buildBricks(); resetBall(); loop(); }
+function stopPaddle(){ /* no-op */ }
+
+/* -------------------- Isometric Voxel Sandbox (simple 3D-like) -------------------- */
+const vcanvas = document.getElementById('voxelCanvas');
+const vctx = vcanvas.getContext('2d');
+let vW = vcanvas.width, vH = vcanvas.height;
+let gridCols = 16, gridRows = 16, maxHeight = 8;
+let grid = [];
+let cam = {ox:0, oy:0, rot:0};
+let placing = true;
+let lastTouch = null;
+
+function initVoxel(){
+  vW = vcanvas.width; vH = vcanvas.height;
+  grid = [];
+  for(let x=0;x<gridCols;x++){ grid[x]=[]; for(let y=0;y<gridRows;y++){ grid[x][y]=[]; for(let z=0;z<maxHeight;z++){ grid[x][y][z] = false; } } }
+  for(let x=0;x<gridCols;x++){ for(let y=0;y<gridRows;y++){ if(y>gridRows-4) grid[x][y][0]=true; } }
+  drawVoxel();
+}
+
+function isoProject(x,y,z){
+  let cx = x - y;
+  let cy = (x + y) / 2 - z;
+  const scale = Math.min(vW / (gridCols*2), vH / (gridRows*1.5));
+  const screenX = vW/2 + (cx - cam.ox) * scale;
+  const screenY = vH/2 + (cy - cam.oy) * scale * 0.8;
+  return {x:screenX, y:screenY, scale:scale};
+}
+
+function drawVoxel(){
+  vctx.clearRect(0,0,vW,vH);
+  const order = [];
+  for(let x=0;x<gridCols;x++){ for(let y=0;y<gridRows;y++){ for(let z=0;z<maxHeight;z++){ if(grid[x][y][z]) order.push({x,y,z}); } } }
+  order.sort((a,b)=> (a.x+a.y+a.z) - (b.x+b.y+b.z));
+  for(const b of order){ drawCube(b.x,b.y,b.z); }
+  vctx.fillStyle = "rgba(255,255,255,0.06)";
+  vctx.fillRect(vW/2-1,0,2,vH);
+  vctx.fillRect(0,vH/2-1,vW,2);
+}
+
+function drawCube(x,y,z){
+  const p = isoProject(x,y,z);
+  const s = p.scale;
+  const w = s*10;
+  const h = s*5;
+  const X = p.x, Y = p.y - z*(s*5);
+  vctx.beginPath();
+  vctx.moveTo(X, Y - h);
+  vctx.lineTo(X + w, Y);
+  vctx.lineTo(X, Y + h);
+  vctx.lineTo(X - w, Y);
+  vctx.closePath();
+  vctx.fillStyle = '#a2d2ff'; vctx.fill(); vctx.strokeStyle='rgba(0,0,0,0.2)'; vctx.stroke();
+  vctx.beginPath(); vctx.moveTo(X - w, Y); vctx.lineTo(X, Y + h); vctx.lineTo(X, Y + h + (s*8)); vctx.lineTo(X - w, Y + (s*8)); vctx.closePath();
+  vctx.fillStyle = '#78b0ff'; vctx.fill(); vctx.stroke();
+  vctx.beginPath(); vctx.moveTo(X + w, Y); vctx.lineTo(X, Y + h); vctx.lineTo(X, Y + h + (s*8)); vctx.lineTo(X + w, Y + (s*8)); vctx.closePath();
+  vctx.fillStyle = '#4d8fe6'; vctx.fill(); vctx.stroke();
+}
+
+function canvasToGrid(cx, cy){
+  let best = null; let bestDist = Infinity;
+  for(let x=0;x<gridCols;x++){ for(let y=0;y<gridRows;y++){ for(let z=0;z<maxHeight;z++){ const p = isoProject(x,y,z); const dx = p.x - cx; const dy = p.y - cy + z*(p.scale*5); const d = Math.hypot(dx,dy); if(d < bestDist){ bestDist = d; best = {x,y,z,p}; } } } }
+  return best;
+}
+
+vcanvas.addEventListener('touchstart', (e)=>{ const t = e.touches[0]; lastTouch = {x:t.clientX, y:t.clientY}; handleVoxelTap(t.clientX, t.clientY); }, {passive:false});
+vcanvas.addEventListener('mousedown', (e)=>{ lastTouch = {x:e.clientX, y:e.clientY}; handleVoxelTap(e.clientX, e.clientY); });
+vcanvas.addEventListener('touchmove', (e)=>{ const t = e.touches[0]; const dx = t.clientX - lastTouch.x; const dy = t.clientY - lastTouch.y; cam.ox -= dx / 30; cam.oy -= dy / 30; lastTouch = {x:t.clientX, y:t.clientY}; drawVoxel(); }, {passive:false});
+vcanvas.addEventListener('mousemove', (e)=>{ if(e.buttons===1){ const dx = e.clientX - lastTouch.x; const dy = e.clientY - lastTouch.y; cam.ox -= dx / 30; cam.oy -= dy / 30; lastTouch = {x:e.clientX, y:e.clientY}; drawVoxel(); } });
+
+function handleVoxelTap(clientX, clientY){
+  const rect = vcanvas.getBoundingClientRect();
+  const cx = clientX - rect.left; const cy = clientY - rect.top;
+  const pick = canvasToGrid(cx, cy);
+  if(!pick) return;
+  let x = pick.x, y = pick.y;
+  let top = -1; for(let z=maxHeight-1; z>=0; z--){ if(grid[x][y][z]){ top = z; break; } }
+  if(placing){ if(top < maxHeight-1) grid[x][y][top+1] = true; } else { if(top >= 0) grid[x][y][top] = false; }
+  drawVoxel();
+}
+
+document.getElementById('rotateBtn').addEventListener('click', ()=>{ cam.ox = 0; cam.oy = 0; cam.rot = (cam.rot+1)%4; drawVoxel(); });
+document.getElementById('addBtn').addEventListener('click', ()=>{ placing=true; });
+document.getElementById('removeBtn').addEventListener('click', ()=>{ placing=false; });
+
+function initVoxelIfNeeded(){ if(!grid || grid.length===0) initVoxel(); }
+function stopVoxel(){ /* nothing to stop */ }
+
+initVoxel();
+
+</script>
+</body>
+</html>
